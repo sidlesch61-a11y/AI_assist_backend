@@ -1,11 +1,17 @@
 import os
-from fastapi import FastAPI
+import logging
+from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from fastapi.exceptions import RequestValidationError
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api.v1 import admin, auth, chat, chat_websocket, consultations, reports, tokens, upload, users, vehicles, workshops
 from app.core.config import settings
 from app.core.logging import configure_logging
 from app.middleware.logging import LoggingMiddleware
+
+logger = logging.getLogger(__name__)
 
 
 def create_app() -> FastAPI:
@@ -50,11 +56,8 @@ def create_app() -> FastAPI:
         # Allow multiple origins separated by comma
         allowed_origins.extend([origin.strip() for origin in cors_origins.split(",")])
     
-    # Log allowed origins in development for debugging
-    if settings.ENVIRONMENT == "development":
-        import logging
-        logger = logging.getLogger(__name__)
-        logger.info(f"CORS allowed origins: {allowed_origins}")
+    # Log allowed origins for debugging
+    logger.info(f"CORS allowed origins: {allowed_origins}")
     
     app.add_middleware(
         CORSMiddleware,
@@ -67,6 +70,58 @@ def create_app() -> FastAPI:
 
     # Middleware
     app.add_middleware(LoggingMiddleware)
+    
+    # Helper function to get CORS origin header
+    def get_cors_origin(request: Request) -> str:
+        """Get the appropriate CORS origin header value."""
+        origin = request.headers.get("origin")
+        if origin and (origin in allowed_origins or "*" in allowed_origins):
+            return origin
+        # Default to first allowed origin or "*" if all origins allowed
+        if "*" in allowed_origins:
+            return "*"
+        return allowed_origins[0] if allowed_origins else "*"
+    
+    # Global exception handlers to ensure CORS headers are always sent
+    @app.exception_handler(StarletteHTTPException)
+    async def http_exception_handler(request: Request, exc: StarletteHTTPException):
+        """Handle HTTP exceptions with CORS headers."""
+        cors_origin = get_cors_origin(request)
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"detail": exc.detail},
+            headers={
+                "Access-Control-Allow-Origin": cors_origin,
+                "Access-Control-Allow-Credentials": "true",
+            }
+        )
+    
+    @app.exception_handler(RequestValidationError)
+    async def validation_exception_handler(request: Request, exc: RequestValidationError):
+        """Handle validation errors with CORS headers."""
+        cors_origin = get_cors_origin(request)
+        return JSONResponse(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            content={"detail": exc.errors()},
+            headers={
+                "Access-Control-Allow-Origin": cors_origin,
+                "Access-Control-Allow-Credentials": "true",
+            }
+        )
+    
+    @app.exception_handler(Exception)
+    async def general_exception_handler(request: Request, exc: Exception):
+        """Handle all other exceptions with CORS headers and logging."""
+        logger.error(f"Unhandled exception: {exc}", exc_info=True)
+        cors_origin = get_cors_origin(request)
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={"detail": "Internal server error"},
+            headers={
+                "Access-Control-Allow-Origin": cors_origin,
+                "Access-Control-Allow-Credentials": "true",
+            }
+        )
 
     # API routes
     prefix = settings.API_V1_PREFIX
