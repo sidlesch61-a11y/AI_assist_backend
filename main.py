@@ -1,3 +1,4 @@
+import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -16,14 +17,42 @@ def create_app() -> FastAPI:
     )
 
     # CORS middleware - must be added before other middleware
+    # Get allowed origins from environment or use defaults
+    allowed_origins = [
+        "http://localhost:5173",
+        "http://localhost:3000",
+        "http://127.0.0.1:5173",
+        "http://127.0.0.1:3000",
+    ]
+    
+    # Add production frontend URL if provided
+    frontend_url = os.getenv("FRONTEND_URL")
+    if frontend_url:
+        allowed_origins.append(frontend_url)
+    
+    # Add Vercel frontend URL
+    vercel_url = os.getenv("VERCEL_URL")
+    if vercel_url:
+        # Vercel provides URL without protocol, add https
+        if not vercel_url.startswith("http"):
+            allowed_origins.append(f"https://{vercel_url}")
+        else:
+            allowed_origins.append(vercel_url)
+    
+    # In production, allow all origins if CORS_ORIGINS is set to "*"
+    cors_origins = os.getenv("CORS_ORIGINS", "")
+    if cors_origins == "*":
+        allowed_origins = ["*"]
+    elif cors_origins:
+        # Allow multiple origins separated by comma
+        allowed_origins.extend([origin.strip() for origin in cors_origins.split(",")])
+    
+    # Always add the Vercel production URL
+    allowed_origins.append("https://ai-assist-eight.vercel.app")
+    
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=[
-            "http://localhost:5173",
-            "http://localhost:3000",
-            "http://127.0.0.1:5173",
-            "http://127.0.0.1:3000",
-        ],
+        allow_origins=allowed_origins,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -60,10 +89,16 @@ if __name__ == "__main__":
     import os
     import uvicorn
 
+    # Get port from environment (Render provides this)
+    port = int(os.getenv("PORT", "8000"))
+    # Only enable reload in development
+    reload = os.getenv("ENVIRONMENT", "development").lower() == "development"
+    
     uvicorn.run(
         "main:app",
         host="0.0.0.0",
-        port=int(os.getenv("PORT", "8000")),
-        reload=True,
+        port=port,
+        reload=reload,
+        log_level="info",
     )
 

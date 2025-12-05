@@ -121,12 +121,42 @@ alembic upgrade head
 
 Or configure Render to run migrations automatically on deploy.
 
+## Start Command Configuration
+
+In Render dashboard, set the **Start Command** to one of the following:
+
+### Option 1: Using Gunicorn (Recommended for Production)
+```bash
+gunicorn main:app -w 4 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:$PORT --timeout 120
+```
+
+### Option 2: Using the Start Script
+```bash
+chmod +x start.sh && ./start.sh
+```
+
+### Option 3: Direct Python (Development only)
+```bash
+python main.py
+```
+
+**⚠️ Important**: Make sure to use `$PORT` in the bind address, as Render provides this dynamically.
+
+## Port Configuration
+
+Render automatically provides a `PORT` environment variable. The application will:
+- Read `PORT` from environment
+- Default to port 8000 if not set
+- Bind to `0.0.0.0` to accept external connections
+
 ## Verification
 
 After deployment, check the logs to ensure:
 - ✅ No "SECRET_KEY" errors
 - ✅ Database connection successful
 - ✅ Application started successfully
+- ✅ Server is listening on the correct port
+- ✅ Health check endpoint responds: `GET /health`
 
 ## Security Checklist
 
