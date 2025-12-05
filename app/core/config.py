@@ -1,11 +1,14 @@
+import os
+import secrets
 from functools import lru_cache
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
     """Application configuration loaded from environment variables."""
 
-    model_config = SettingsConfigDict(env_file=".env", case_sensitive=True)
+    model_config = SettingsConfigDict(env_file=".env", case_sensitive=True, extra="ignore")
 
     ENVIRONMENT: str = "development"
     DEBUG: bool = True
@@ -13,7 +16,7 @@ class Settings(BaseSettings):
     API_V1_PREFIX: str = "/api/v1"
 
     # Security
-    SECRET_KEY: str
+    SECRET_KEY: str = "dev-secret-key-change-in-production-" + secrets.token_urlsafe(32)
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
     JWT_ALGORITHM: str = "HS256"
@@ -37,6 +40,37 @@ class Settings(BaseSettings):
     # OpenAI
     OPENAI_API_KEY: str | None = None
     UPLOAD_DIR: str = "uploads"
+
+    @field_validator("ENVIRONMENT")
+    @classmethod
+    def validate_environment(cls, v: str) -> str:
+        """Normalize environment value."""
+        return v.lower()
+
+    @model_validator(mode="after")
+    def validate_secret_key_production(self):
+        """Validate SECRET_KEY is secure in production."""
+        environment = self.ENVIRONMENT.lower()
+        
+        # In production, ensure SECRET_KEY is set and secure
+        if environment in ("production", "staging"):
+            if not self.SECRET_KEY or self.SECRET_KEY.startswith("dev-secret-key"):
+                raise ValueError(
+                    "SECRET_KEY must be set to a secure value in production. "
+                    "Generate one using: python scripts/generate_secret_key.py"
+                )
+            if len(self.SECRET_KEY) < 32:
+                raise ValueError("SECRET_KEY must be at least 32 characters long in production")
+        
+        return self
+
+    @property
+    def database_url(self) -> str:
+        """Construct database URL from components."""
+        return (
+            f"postgresql://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}"
+            f"@{self.POSTGRES_HOST}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
+        )
 
 
 @lru_cache
